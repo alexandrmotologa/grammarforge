@@ -1,61 +1,106 @@
 <p align="center">
-  <img src="docs/images/grammarforge_logo.svg" alt="GrammarForge Logo" width="180" />
+  <img src="docs/images/grammarforge_logo.png?raw=true" alt="GrammarForge Logo" width="130" style="border-radius: 28px;" />
 </p>
 
-# GrammarForge
+<h1 align="center">GrammarForge</h1>
 
-Constrained decoding engine and JSON Schema to GBNF grammar compiler with sub-millisecond logit masking for local LLM inference engines.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue?style=flat-square" alt="Python Version" />
+  <img src="https://img.shields.io/badge/tests-67%20passed-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/coverage-85%25-green?style=flat-square" alt="Coverage" />
+  <img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" alt="License" />
+</p>
 
-![GrammarForge Studio Demo](docs/images/grammarforge_demo.gif)
+<p align="center">
+  <b>High-throughput constrained decoding engine and JSON Schema to GBNF compiler with sub-millisecond logit masking for local LLM gateways.</b>
+</p>
+
+<p align="center">
+  <img src="docs/images/grammarforge_demo.gif?raw=true" alt="GrammarForge Studio Demo" width="920" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);" />
+</p>
 
 ## Overview
 
 Local inference runtimes such as llama.cpp, vLLM, and InferOps need guarantees that model outputs match expected schemas. Without grammar enforcement, LLMs frequently emit malformed JSON, missing fields, or invalid types that break downstream code.
 
-GrammarForge compiles JSON Schema (Draft 7 and 2020-12), Pydantic models, and regular expressions directly into GGML BNF (GBNF) grammars. It provides a prefix-trie token masking engine that computes valid token bitmasks in under 75 microseconds per generation step.
+GrammarForge compiles JSON Schema (Draft 7 and 2020-12), Pydantic models, SQL DDL statements, and regular expressions directly into GGML BNF (GBNF) grammars. It provides a prefix trie token masking engine that computes valid token bitmasks in under 75 microseconds per generation step.
 
 ## Key Capabilities
 
 - **JSON Schema to GBNF Compiler**: Converts primitive types, objects, arrays, nested `$ref` definitions, `anyOf`/`oneOf` unions, enums, and regex patterns to deterministic GBNF grammar rules.
+- **SQL DDL to GBNF Compiler**: Converts `CREATE TABLE` statements with data types and `CHECK` constraints into structured JSON grammar rules for synthetic data generation and ETL.
 - **Regex to GBNF Translation**: Compiles arbitrary regular expressions into GBNF character classes and sequences.
 - **Pydantic Model Introspection**: Compiles Pydantic BaseModel classes, TypedDicts, and standard dataclasses into GBNF without manual schema serialization.
 - **Token Vocabulary Prefix Trie**: Byte-level prefix trie indexing tokenizer vocabularies for instant token validation.
 - **Sub-Millisecond Logit Masking**: Produces floating point bias vectors (`0.0` for allowed, `-1e9` for forbidden) across vocabulary sizes up to 128k tokens in microsecond latency.
-- **LLM Gateway Integration**: Drop-in `LogitsProcessor` implementations for vLLM, HuggingFace Transformers, and llama.cpp.
-- **Developer CLI**: Full command-line interface powered by Typer for compiling schemas, testing regexes, benchmarking masking latency, and validating outputs.
-- **Interactive Web Studio**: Built-in FastAPI dashboard with real-time grammar compilation, token stepping simulator, and visualizer.
+- **Payload Auto-Repair**: Real-time healing for truncated or partially streamed JSON responses, closing unclosed brackets and strings cleanly.
+- **LLM Gateway Integration**: Drop-in `LogitsProcessor` implementations for vLLM, HuggingFace Transformers, and llama.cpp, plus an OpenAI-compatible reverse proxy.
+- **Developer CLI**: Command-line interface powered by Typer for compiling schemas, testing regexes, benchmarking masking latency, and validating outputs.
+- **Interactive Web Studio**: Built-in FastAPI dashboard with real-time grammar compilation, token stepping simulator, SQL compiler, and one-click code export.
+
+## Studio Interface Showcase
+
+<table width="100%">
+  <tr>
+    <td width="50%" align="center">
+      <b>Interactive Schema Compiler & Token Mask Stepper</b><br/>
+      <img src="docs/images/grammarforge-1.png?raw=true" alt="Interactive Schema Compiler & Stepper" width="100%" style="border-radius: 8px;"/>
+      <p align="left"><sub>Visualizes JSON Schema compilation into 11 GBNF rules alongside vocabulary trie search, microsecond latency metrics, and step-by-step candidate token chips.</sub></p>
+    </td>
+    <td width="50%" align="center">
+      <b>SQL DDL to Constrained Grammar Compiler</b><br/>
+      <img src="docs/images/grammarforge-2.png?raw=true" alt="SQL DDL Compiler" width="100%" style="border-radius: 8px;"/>
+      <p align="left"><sub>Parses PostgreSQL / SQLite DDL schemas and emits strict GBNF rules verifying field types, timestamps, and CHECK constraint membership.</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <b>Streaming JSON Auto-Repair & Validator</b><br/>
+      <img src="docs/images/grammarforge-3.png?raw=true" alt="Streaming JSON Auto-Repair" width="100%" style="border-radius: 8px;"/>
+      <p align="left"><sub>Real-time payload inspection and repair engine that synthesizes missing closing delimiters for interrupted LLM generations.</sub></p>
+    </td>
+    <td width="50%" align="center">
+      <b>One-Click Client Code Export</b><br/>
+      <img src="docs/images/grammarforge-4.png?raw=true" alt="One-Click Client Code Export" width="100%" style="border-radius: 8px;"/>
+      <p align="left"><sub>Provides copy-paste production snippets for llama-cpp-python, vLLM LogitsProcessor, and OpenAI-compatible proxy gateway requests.</sub></p>
+    </td>
+  </tr>
+</table>
 
 ## Architecture
 
 ```
-+-----------------------------------------------------------+
-|                        Input Layer                        |
-|  JSON Schema (Draft 7/2020-12) | Pydantic Models | Regex  |
-+-----------------------------------------------------------+
-                             |
-                             v
-+-----------------------------------------------------------+
-|                   Compiler Pipeline                       |
-|   - AST Normalizer & Reference Resolver                   |
-|   - Regex to GBNF Subrule Generator                       |
-|   - Deterministic GBNF Rule Formatter                     |
-+-----------------------------------------------------------+
-                             |
-                             v
-+-----------------------------------------------------------+
-|                   Grammar Engine                          |
-|   - GBNF Parser & State Stepper                           |
-|   - Byte-level Prefix Trie (Tokenizer Vocab)              |
-|   - Bitmask & Logit Bias Calculator (<75us/step)          |
-+-----------------------------------------------------------+
-                             |
-                             v
-+-----------------------------------------------------------+
-|                   Gateway Delivery                        |
-|   - vLLM LogitsProcessor                                  |
-|   - llama.cpp Grammar Bridge                              |
-|   - Typer CLI / Interactive FastAPI Studio                |
-+-----------------------------------------------------------+
++-----------------------------------------------------------------+
+|                          Input Layer                            |
+|  JSON Schema (Draft 7/2020) | Pydantic | SQL DDL | Regex        |
++-----------------------------------------------------------------+
+                                |
+                                v
++-----------------------------------------------------------------+
+|                     Compiler Pipeline                           |
+|   - AST Normalizer & Reference Resolver                         |
+|   - Regex to GBNF Subrule Generator                             |
+|   - SQL DDL Lexer & Constraint Translator                       |
+|   - Deterministic GBNF Rule Formatter & Linter                  |
++-----------------------------------------------------------------+
+                                |
+                                v
++-----------------------------------------------------------------+
+|                     Grammar Engine                              |
+|   - GBNF Parser & State Stepper                                 |
+|   - Byte-level Prefix Trie (Tokenizer Vocab)                    |
+|   - Dynamic Bitmask & Logit Bias Calculator (<75us/step)        |
+|   - JSON Stream Auto-Repair Engine                              |
++-----------------------------------------------------------------+
+                                |
+                                v
++-----------------------------------------------------------------+
+|                     Gateway Delivery                            |
+|   - vLLM LogitsProcessor / HuggingFace Pipeline                 |
+|   - llama.cpp Grammar Bridge                                    |
+|   - OpenAI-Compatible Reverse Proxy Gateway                     |
+|   - Typer CLI / Interactive FastAPI Studio                      |
++-----------------------------------------------------------------+
 ```
 
 Detailed architectural diagrams and pipeline internals are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -168,7 +213,7 @@ processor = GrammarForgeLogitsProcessor(schema=schema, vocab_trie=trie)
 
 ## Documentation
 
-- [Architecture & Internal Design](docs/ARCHITECTURE.md): Complete breakdown of IR AST, prefix-trie indexing, and parser state machine.
+- [Architecture & Internal Design](docs/ARCHITECTURE.md): Complete breakdown of IR AST, prefix trie indexing, and parser state machine.
 - [GBNF Syntax & Rule Reference](docs/GBNF_GUIDE.md): Grammar syntax rules, character class escaping, and formatting guidelines.
 - [Gateway Integration Guide](docs/GATEWAY_INTEGRATION.md): Integration tutorials for vLLM, llama-cpp-python, and streaming validation.
 
