@@ -18,12 +18,16 @@ from grammarforge.cli.formatters import (
 )
 from grammarforge.compiler.gbnf_ir import Grammar, Rule
 from grammarforge.compiler.json_schema import compile_json_schema
+from grammarforge.compiler.linter import GbnfLinter, format_gbnf
 from grammarforge.compiler.pydantic_bridge import compile_pydantic_model, load_model_from_spec
 from grammarforge.compiler.regex_to_gbnf import compile_regex_to_gbnf_node
+from grammarforge.compiler.sql_ddl import compile_sql_ddl_to_gbnf
 from grammarforge.core.config import CompilerConfig, EngineConfig, KeyOrdering, WhitespaceMode
 from grammarforge.engine.masking import LogitMasker
+from grammarforge.engine.repair import heal_partial_json
 from grammarforge.engine.state_machine import JsonStateMachine, ParserStatus
 from grammarforge.engine.trie import VocabularyTrie
+from grammarforge.gateway.proxy import create_gateway_proxy
 
 app = typer.Typer(
     name="grammarforge",
@@ -268,6 +272,135 @@ def bench_cmd(
     }
 
     print_benchmark_table(stats)
+
+
+@app.command("repair")
+def repair_cmd(
+    target: str = typer.Argument(..., help="Path to truncated JSON file or raw JSON text."),
+    schema_path: Optional[str] = typer.Option(None, "--schema", "-s", help="Optional JSON Schema to enforce."),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="Output file to save repaired JSON."),
+) -> None:
+    """Repair and heal an incomplete or truncated JSON string."""
+    if os.path.exists(target):
+        with open(target, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+    else:
+        raw_text = target
+
+    schema_data = None
+    if schema_path and os.path.exists(schema_path):
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema_data = json.load(f)
+
+    result = heal_partial_json(raw_text, schema=schema_data)
+
+    if result.is_valid_json:
+        console.print(f"[bold green]Repair SUCCESS:[/bold green] Added suffix: [yellow]{repr(result.suffix_added)}[/yellow]")
+        if output:
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(result.repaired_text)
+            console.print(f"[bold green]Saved repaired JSON to:[/bold green] {output}")
+        else:
+            console.print(result.repaired_text)
+    else:
+        console.print(f"[bold red]Repair FAILED:[/bold red] {result.error}")
+        raise typer.Exit(1)
+
+
+@app.command("lint")
+def lint_cmd(
+    gbnf_path: str = typer.Argument(..., help="Path to .gbnf file to lint."),
+) -> None:
+    """Analyze and lint a GBNF grammar for syntax, unreachable, and left-recursion errors."""
+    if not os.path.exists(gbnf_path):
+        console.print(f"[bold red]Error:[/bold red] File not found: {gbnf_path}")
+        raise typer.Exit(1)
+
+    with open(gbnf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    linter = GbnfLinter(content)
+    diagnostics = linter.lint()
+
+    if not diagnostics:
+        console.print(f"[bold green]No issues found![/bold green] '{gbnf_path}' is valid and well-formed.")
+        return
+
+    has_errors = False
+    for diag in diagnostics:
+        color = "red" if diag.severity == "error" else "yellow"
+        if diag.severity == "error":
+            has_errors = True
+        console.print(f"[{color}][bold]{diag.severity.upper()}[/bold][/{color}] line {diag.line_number or '?'}: {diag.message}")
+
+    if has_errors:
+        raise typer.Exit(1)
+
+
+@app.command("fmt")
+def fmt_cmd(
+    gbnf_path: str = typer.Argument(..., help="Path to .gbnf file to format."),
+    write: bool = typer.Option(False, "--write", "-w", help="Overwrite file with formatted grammar."),
+) -> None:
+    """Format and align GBNF grammar syntax."""
+    if not os.path.exists(gbnf_path):
+        console.print(f"[bold red]Error:[/bold red] File not found: {gbnf_path}")
+        raise typer.Exit(1)
+
+    with open(gbnf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    formatted = format_gbnf(content)
+    if write:
+        with open(gbnf_path, "w", encoding="utf-8") as f:
+            f.write(formatted)
+        console.print(f"[bold green]Formatted and updated:[/bold green] {gbnf_path}")
+    else:
+        print_gbnf(formatted, title=f"Formatted GBNF: {gbnf_path}")
+
+
+@app.command("sql")
+def sql_cmd(
+    target: str = typer.Argument(..., help="SQL CREATE TABLE statement or path to .sql file."),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="Output .gbnf file path."),
+    format_type: str = typer.Option("json", "--format", "-f", help="'json' row object or 'insert' SQL statement."),
+) -> None:
+    """Compile SQL DDL schema into GBNF grammar."""
+    if os.path.exists(target):
+        with open(target, "r", encoding="utf-8") as f:
+            sql_text = f.read()
+    else:
+        sql_text = target
+
+    try:
+        gbnf = compile_sql_ddl_to_gbnf(sql_text, output_format=format_type)
+    except Exception as err:
+        console.print(f"[bold red]SQL Compilation Error:[/bold red] {err}")
+        raise typer.Exit(1)
+
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(gbnf)
+        console.print(f"[bold green]Saved GBNF grammar to:[/bold green] {output}")
+    else:
+        print_gbnf(gbnf, title=f"Compiled SQL DDL ({format_type})")
+
+
+@app.command("proxy")
+def proxy_cmd(
+    upstream: str = typer.Option("http://127.0.0.1:11434", "--upstream", "-u", help="Upstream LLM server URL."),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Proxy bind host address."),
+    port: int = typer.Option(8080, "--port", "-p", help="Proxy bind port."),
+) -> None:
+    """Start the OpenAI-compatible reverse proxy gateway with GBNF enforcement."""
+    import uvicorn
+    print_banner()
+    console.print(f"[bold cyan]Starting GrammarForge Gateway Proxy[/bold cyan]")
+    console.print(f"  Upstream server: [green]{upstream}[/green]")
+    console.print(f"  Listening on:    [bold green]http://{host}:{port}[/bold green]")
+    app_instance = create_gateway_proxy(upstream_url=upstream)
+    uvicorn.run(app_instance, host=host, port=port)
+
 
 
 @app.command("studio")

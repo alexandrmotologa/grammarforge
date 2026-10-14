@@ -88,6 +88,31 @@ Compile a regular expression pattern directly into GBNF:
 grammarforge regex "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
 ```
 
+Compile a SQL DDL schema directly to GBNF:
+
+```bash
+grammarforge sql "CREATE TABLE users (id SERIAL PRIMARY KEY, email VARCHAR(255) NOT NULL);"
+```
+
+Auto-repair a truncated JSON completion:
+
+```bash
+grammarforge repair '{"name": "Alex", "tags": ["admin", "dev"'
+```
+
+Lint and format GBNF grammar files:
+
+```bash
+grammarforge lint grammar.gbnf
+grammarforge fmt grammar.gbnf --write
+```
+
+Start the OpenAI-compatible reverse proxy gateway:
+
+```bash
+grammarforge proxy --upstream http://127.0.0.1:11434 --port 8080
+```
+
 Validate a JSON payload against a schema:
 
 ```bash

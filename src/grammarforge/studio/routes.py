@@ -8,10 +8,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from grammarforge.compiler.gbnf_ir import Grammar, Rule
 from grammarforge.compiler.json_schema import SchemaCompiler, compile_json_schema
+from grammarforge.compiler.linter import GbnfLinter, format_gbnf
 from grammarforge.compiler.pydantic_bridge import compile_pydantic_source
 from grammarforge.compiler.regex_to_gbnf import compile_regex_to_gbnf_node
+from grammarforge.compiler.sql_ddl import compile_sql_ddl_to_gbnf
 from grammarforge.core.config import CompilerConfig, KeyOrdering, WhitespaceMode
 from grammarforge.engine.masking import LogitMasker
+from grammarforge.engine.repair import heal_partial_json
 from grammarforge.engine.state_machine import JsonStateMachine, ParserStatus
 from grammarforge.engine.trie import VocabularyTrie
 
@@ -214,3 +217,113 @@ async def api_examples() -> Dict[str, Any]:
             }
         }
     }
+
+
+class RepairApiRequest(BaseModel):
+    partial_text: str
+    schema_data: Optional[Dict[str, Any]] = None
+
+
+@router.post("/repair")
+async def api_repair(req: RepairApiRequest) -> Dict[str, Any]:
+    """Repair and heal an incomplete JSON string."""
+    res = heal_partial_json(req.partial_text, schema=req.schema_data)
+    return res.to_dict() | {"repaired_text": res.repaired_text}
+
+
+class SqlApiRequest(BaseModel):
+    sql: str
+    format_type: str = "json"
+
+
+@router.post("/sql")
+async def api_sql(req: SqlApiRequest) -> Dict[str, Any]:
+    """Compile SQL DDL to GBNF."""
+    try:
+        gbnf = compile_sql_ddl_to_gbnf(req.sql, output_format=req.format_type)
+        return {"gbnf": gbnf, "format": req.format_type}
+    except Exception as err:
+        raise HTTPException(status_code=422, detail=str(err))
+
+
+class LintApiRequest(BaseModel):
+    gbnf: str
+
+
+@router.post("/lint")
+async def api_lint(req: LintApiRequest) -> Dict[str, Any]:
+    """Lint and analyze a GBNF grammar."""
+    linter = GbnfLinter(req.gbnf)
+    diags = linter.lint()
+    return {
+        "diagnostics": [d.to_dict() for d in diags],
+        "is_valid": not any(d.severity == "error" for d in diags),
+    }
+
+
+@router.post("/fmt")
+async def api_fmt(req: LintApiRequest) -> Dict[str, Any]:
+    """Format and align GBNF grammar."""
+    formatted = format_gbnf(req.gbnf)
+    return {"formatted_gbnf": formatted}
+
+
+class ExportCodeRequest(BaseModel):
+    schema_data: Dict[str, Any]
+    gbnf: str
+
+
+@router.post("/export_code")
+async def api_export_code(req: ExportCodeRequest) -> Dict[str, str]:
+    """Generate production client code snippets for python, vLLM, and cURL."""
+    schema_json = json.dumps(req.schema_data, indent=2)
+    escaped_gbnf = json.dumps(req.gbnf)
+
+    python_llama = f'''from llama_cpp import Llama, LlamaGrammar
+
+grammar = LlamaGrammar.from_string({escaped_gbnf})
+llm = Llama(model_path="./model.gguf")
+
+response = llm(
+    "Your prompt here:",
+    grammar=grammar,
+    max_tokens=512
+)
+print(response["choices"][0]["text"])
+'''
+
+    python_vllm = f'''from vllm import LLM, SamplingParams
+from grammarforge import GrammarForgeLogitsProcessor, VocabularyTrie
+
+schema = {schema_json}
+vocab = VocabularyTrie.from_huggingface_json("path/to/tokenizer.json")
+processor = GrammarForgeLogitsProcessor(schema=schema, vocab_trie=vocab)
+
+sampling_params = SamplingParams(
+    temperature=0.0,
+    logits_processors=[processor],
+    max_tokens=512
+)
+
+llm = LLM(model="meta-llama/Llama-3-8B-Instruct")
+output = llm.generate(["Prompt here:"], sampling_params)
+'''
+
+    curl_gateway = f'''curl http://127.0.0.1:8080/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -d '{{
+    "model": "local-model",
+    "messages": [{{"role": "user", "content": "Extract data"}}],
+    "response_format": {{
+      "type": "json_object",
+      "schema": {schema_json}
+    }}
+  }}'
+'''
+
+    return {
+        "python_llama_cpp": python_llama,
+        "python_vllm": python_vllm,
+        "curl_openai_proxy": curl_gateway,
+    }
+

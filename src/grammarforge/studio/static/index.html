@@ -33,7 +33,6 @@
       overflow-x: hidden;
     }
 
-    /* Header */
     header {
       background: rgba(11, 15, 25, 0.95);
       backdrop-filter: blur(12px);
@@ -82,14 +81,14 @@
     .header-controls {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     select, button, input {
       background: rgba(30, 41, 59, 0.8);
       border: 1px solid var(--border);
       color: var(--text);
-      padding: 7px 14px;
+      padding: 7px 12px;
       border-radius: 6px;
       font-size: 13px;
       outline: none;
@@ -113,7 +112,17 @@
       background: var(--accent-hover);
     }
 
-    /* Main Container */
+    button.btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+
+    button.btn-outline:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--accent);
+    }
+
     main {
       flex: 1;
       display: grid;
@@ -205,7 +214,6 @@
       outline: none;
     }
 
-    /* Output Panels */
     .stat-pill {
       font-size: 11px;
       padding: 2px 8px;
@@ -215,7 +223,6 @@
       color: var(--accent);
     }
 
-    /* Interactive Masking Panel */
     .masking-body {
       padding: 16px;
       display: flex;
@@ -238,7 +245,7 @@
 
     .prefix-input-wrap {
       display: flex;
-      gap: 8px;
+      gap: 6px;
     }
 
     .prefix-input-wrap input {
@@ -292,7 +299,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      max-height: 240px;
+      max-height: 200px;
       overflow-y: auto;
       padding: 8px;
       background: rgba(0, 0, 0, 0.2);
@@ -319,12 +326,11 @@
       transform: translateY(-1px);
     }
 
-    /* Validation Tab */
     .validation-box {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 8px;
       padding-top: 12px;
       border-top: 1px solid var(--border);
     }
@@ -348,6 +354,59 @@
       background: rgba(239, 68, 68, 0.15);
       border: 1px solid var(--danger);
       color: #fca5a5;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-body {
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    pre code {
+      display: block;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #93c5fd;
+      overflow-x: auto;
     }
   </style>
 </head>
@@ -374,6 +433,7 @@
         <option value="pretty">Whitespace: Pretty (Indented)</option>
       </select>
 
+      <button class="btn-outline" onclick="openExportModal()">Export Code</button>
       <button class="btn-primary" onclick="triggerCompile()">Compile GBNF</button>
     </div>
   </header>
@@ -387,10 +447,11 @@
           <button class="tab-btn active" id="tabSchema" onclick="switchInputTab('schema')">JSON Schema</button>
           <button class="tab-btn" id="tabRegex" onclick="switchInputTab('regex')">Regex</button>
           <button class="tab-btn" id="tabPydantic" onclick="switchInputTab('pydantic')">Pydantic</button>
+          <button class="tab-btn" id="tabSql" onclick="switchInputTab('sql')">SQL DDL</button>
         </div>
       </div>
       <div class="editor-wrapper">
-        <textarea id="sourceEditor" spellcheck="false" placeholder="Enter JSON Schema..."></textarea>
+        <textarea id="sourceEditor" spellcheck="false" placeholder="Enter schema or model..."></textarea>
       </div>
     </div>
 
@@ -398,8 +459,10 @@
     <div class="panel">
       <div class="panel-header">
         <h2>Compiled GBNF Grammar</h2>
-        <div style="display: flex; gap: 8px; align-items: center;">
+        <div style="display: flex; gap: 6px; align-items: center;">
           <span class="stat-pill" id="ruleCountPill">0 Rules</span>
+          <button onclick="triggerFmt()" style="padding: 3px 8px; font-size: 11px;">Format</button>
+          <button onclick="triggerLint()" style="padding: 3px 8px; font-size: 11px;">Lint</button>
           <button onclick="copyGbnf()" style="padding: 3px 8px; font-size: 11px;">Copy</button>
         </div>
       </div>
@@ -416,10 +479,11 @@
       </div>
       <div class="masking-body">
         <div class="prefix-box">
-          <label for="prefixInput">Current Generation Prefix (Click chips to append):</label>
+          <label for="prefixInput">Current Generation Prefix:</label>
           <div class="prefix-input-wrap">
             <input type="text" id="prefixInput" value='{"tool": "' oninput="triggerMask()">
-            <button onclick="resetPrefix()" style="padding: 7px 12px;">Reset</button>
+            <button onclick="undoStep()" title="Undo last token" style="padding: 7px 10px;">Undo</button>
+            <button onclick="resetPrefix()" style="padding: 7px 10px;">Reset</button>
           </div>
         </div>
 
@@ -439,18 +503,19 @@
         </div>
 
         <div class="chips-section">
-          <h3>Allowed Candidate Tokens (Sample):</h3>
+          <h3>Allowed Candidate Tokens (Click to step):</h3>
           <div class="chips-grid" id="chipsContainer">
             <div style="color: var(--text-muted); font-size: 12px;">Loading vocabulary...</div>
           </div>
         </div>
 
-        <!-- Validation Section -->
+        <!-- Validation & Healing Section -->
         <div class="validation-box">
-          <label style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Payload Validator:</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="payloadInput" placeholder='{"tool":"read_file","parameters":{"query":"main.py"}}' style="flex: 1;">
+          <label style="font-size: 12px; font-weight: 600; color: var(--text-muted);">Payload Validator & Healer:</label>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="payloadInput" placeholder='{"tool":"read_file","parameters":{"query":"main.py"' style="flex: 1;">
             <button class="btn-primary" onclick="triggerValidate()">Validate</button>
+            <button class="btn-outline" onclick="triggerHeal()">Heal</button>
           </div>
           <div id="validationResult" class="validation-result"></div>
         </div>
@@ -458,9 +523,30 @@
     </div>
   </main>
 
+  <!-- Export Modal -->
+  <div id="exportModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 style="font-size: 16px;">Export Client Code Snippets</h3>
+        <button onclick="closeExportModal()" style="background: none; border: none; font-size: 18px; color: var(--text); cursor: pointer;">✕</button>
+      </div>
+      <div class="modal-body">
+        <h4 style="font-size: 13px; color: var(--text-muted);">Python (llama-cpp-python):</h4>
+        <pre><code id="codeLlama">Loading...</code></pre>
+
+        <h4 style="font-size: 13px; color: var(--text-muted);">Python (vLLM LogitsProcessor):</h4>
+        <pre><code id="codeVllm">Loading...</code></pre>
+
+        <h4 style="font-size: 13px; color: var(--text-muted);">cURL (OpenAI Proxy Gateway):</h4>
+        <pre><code id="codeCurl">Loading...</code></pre>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentSourceType = 'schema';
     let examplesData = {};
+    let prefixHistory = [];
 
     async function init() {
       try {
@@ -484,6 +570,8 @@
         editor.value = '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$';
       } else if (tab === 'pydantic') {
         editor.value = 'from pydantic import BaseModel, Field\n\nclass Model(BaseModel):\n    query: str\n    limit: int = Field(default=10, ge=1, le=100)\n';
+      } else if (tab === 'sql') {
+        editor.value = 'CREATE TABLE users (\n    id SERIAL PRIMARY KEY,\n    email VARCHAR(255) NOT NULL,\n    status VARCHAR(50) CHECK(status IN (\'active\', \'pending\', \'disabled\')),\n    created_at TIMESTAMP\n);';
       }
       triggerCompile();
     }
@@ -500,26 +588,35 @@
       const editorVal = document.getElementById('sourceEditor').value;
       const wsMode = document.getElementById('wsSelector').value;
 
-      let payload = {
-        source_type: currentSourceType,
-        whitespace_mode: wsMode
-      };
-
       try {
-        if (currentSourceType === 'schema') {
-          payload.schema_data = JSON.parse(editorVal);
-        } else if (currentSourceType === 'regex') {
-          payload.regex_pattern = editorVal.trim();
-        } else if (currentSourceType === 'pydantic') {
-          payload.pydantic_source = editorVal;
-          payload.pydantic_class = 'Model';
-        }
+        let res;
+        if (currentSourceType === 'sql') {
+          res = await fetch('/api/sql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sql: editorVal, format_type: 'json' })
+          });
+        } else {
+          let payload = {
+            source_type: currentSourceType,
+            whitespace_mode: wsMode
+          };
 
-        const res = await fetch('/api/compile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+          if (currentSourceType === 'schema') {
+            payload.schema_data = JSON.parse(editorVal);
+          } else if (currentSourceType === 'regex') {
+            payload.regex_pattern = editorVal.trim();
+          } else if (currentSourceType === 'pydantic') {
+            payload.pydantic_source = editorVal;
+            payload.pydantic_class = 'Model';
+          }
+
+          res = await fetch('/api/compile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
 
         if (!res.ok) {
           const err = await res.json();
@@ -529,7 +626,7 @@
 
         const data = await res.json();
         document.getElementById('gbnfOutput').value = data.gbnf;
-        document.getElementById('ruleCountPill').innerText = data.rule_count + ' Rules';
+        document.getElementById('ruleCountPill').innerText = (data.rule_count || data.gbnf.split('::=').length - 1) + ' Rules';
 
         triggerMask();
       } catch (err) {
@@ -574,7 +671,6 @@
           document.getElementById('statusPill').style.color = 'var(--warning)';
         }
 
-        // Render chips
         const chipsEl = document.getElementById('chipsContainer');
         chipsEl.innerHTML = '';
         data.sample_allowed_tokens.forEach(tok => {
@@ -583,6 +679,7 @@
           chip.innerText = JSON.stringify(tok.str);
           chip.title = 'Token ID: ' + tok.id;
           chip.onclick = () => {
+            prefixHistory.push(document.getElementById('prefixInput').value);
             document.getElementById('prefixInput').value += tok.str;
             triggerMask();
           };
@@ -592,6 +689,19 @@
       } catch (e) {
         console.error('Mask error:', e);
       }
+    }
+
+    function undoStep() {
+      if (prefixHistory.length > 0) {
+        document.getElementById('prefixInput').value = prefixHistory.pop();
+        triggerMask();
+      }
+    }
+
+    function resetPrefix() {
+      prefixHistory = [];
+      document.getElementById('prefixInput').value = '{"';
+      triggerMask();
     }
 
     async function triggerValidate() {
@@ -618,9 +728,63 @@
       }
     }
 
-    function resetPrefix() {
-      document.getElementById('prefixInput').value = '{"';
-      triggerMask();
+    async function triggerHeal() {
+      const editorVal = document.getElementById('sourceEditor').value;
+      const payload = document.getElementById('payloadInput').value;
+      const resEl = document.getElementById('validationResult');
+
+      try {
+        let schema = null;
+        if (currentSourceType === 'schema') {
+          schema = JSON.parse(editorVal);
+        }
+
+        const res = await fetch('/api/repair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ partial_text: payload, schema_data: schema })
+        });
+
+        const data = await res.json();
+        if (data.is_valid_json) {
+          document.getElementById('payloadInput').value = data.repaired_text;
+          resEl.className = 'validation-result success';
+          resEl.innerText = `✔ Healed! Added suffix: ${JSON.stringify(data.suffix_added)}`;
+        } else {
+          resEl.className = 'validation-result error';
+          resEl.innerText = `✘ Healing failed: ${data.error}`;
+        }
+      } catch (e) {
+        resEl.className = 'validation-result error';
+        resEl.innerText = 'Error: ' + e.message;
+      }
+    }
+
+    async function triggerFmt() {
+      const gbnf = document.getElementById('gbnfOutput').value;
+      const res = await fetch('/api/fmt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gbnf })
+      });
+      const data = await res.json();
+      document.getElementById('gbnfOutput').value = data.formatted_gbnf;
+    }
+
+    async function triggerLint() {
+      const gbnf = document.getElementById('gbnfOutput').value;
+      const res = await fetch('/api/lint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gbnf })
+      });
+      const data = await res.json();
+      if (data.is_valid) {
+        alert('Grammar check passed! Zero errors.');
+      } else {
+        const issues = data.diagnostics.map(d => `[${d.severity.toUpperCase()}] line ${d.line || '?'}: ${d.message}`).join('\n');
+        alert('Lint Diagnostics:\n' + issues);
+      }
     }
 
     function copyGbnf() {
@@ -628,6 +792,30 @@
       navigator.clipboard.writeText(text);
       document.getElementById('ruleCountPill').innerText = 'Copied!';
       setTimeout(() => triggerCompile(), 1000);
+    }
+
+    async function openExportModal() {
+      const editorVal = document.getElementById('sourceEditor').value;
+      const gbnf = document.getElementById('gbnfOutput').value;
+      try {
+        let schema = currentSourceType === 'schema' ? JSON.parse(editorVal) : { type: "string" };
+        const res = await fetch('/api/export_code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schema_data: schema, gbnf: gbnf })
+        });
+        const data = await res.json();
+        document.getElementById('codeLlama').innerText = data.python_llama_cpp;
+        document.getElementById('codeVllm').innerText = data.python_vllm;
+        document.getElementById('codeCurl').innerText = data.curl_openai_proxy;
+        document.getElementById('exportModal').style.display = 'flex';
+      } catch (e) {
+        console.error('Export error:', e);
+      }
+    }
+
+    function closeExportModal() {
+      document.getElementById('exportModal').style.display = 'none';
     }
 
     window.onload = init;
